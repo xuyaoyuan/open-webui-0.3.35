@@ -19,7 +19,6 @@ __pycache__/
 # Pyodide distribution
 static/pyodide/*
 !static/pyodide/pyodide-lock.json
-
 # Distribution / packaging
 .Python
 build/
