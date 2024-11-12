@@ -78,6 +78,12 @@
 								: ''} transition"
 							href="/admin/settings">{$i18n.t('Settings')}</a
 						>
+						<a
+							class="min-w-fit rounded-lg p-1.5 px-3 {$page.url.pathname.includes('/admin/responses')
+								? 'bg-gray-50 dark:bg-gray-850'
+								: ''} transition"
+							href="/admin/responses">{$i18n.t('Responses')}</a
+						>
 					</div>
 				</div>
 			</div>

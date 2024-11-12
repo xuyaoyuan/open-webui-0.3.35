@@ -52,6 +52,8 @@ export const temporaryChatEnabled = writable(false);
 export const scrollPaginationEnabled = writable(false);
 export const currentChatPage = writable(1);
 
+export const IsResponse = writable(false);
+
 export type Model = OpenAIModel | OllamaModel;
 
 type BaseModel = {
@@ -198,4 +200,6 @@ type SessionUser = {
 	name: string;
 	role: string;
 	profile_image_url: string;
+	enable_model: string;
+	department: string;
 };

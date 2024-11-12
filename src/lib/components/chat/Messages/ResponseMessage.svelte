@@ -9,7 +9,7 @@
 
 	const dispatch = createEventDispatcher();
 
-	import { config, models, settings, user } from '$lib/stores';
+	import { config, models, settings, user, IsResponse } from '$lib/stores';
 	import { synthesizeOpenAISpeech } from '$lib/apis/audio';
 	import { imageGenerations } from '$lib/apis/images';
 	import {
@@ -44,6 +44,7 @@
 	import { createNewFeedback, getFeedbackById, updateFeedbackById } from '$lib/apis/evaluations';
 	import { getChatById } from '$lib/apis/chats';
 	import { generateTags } from '$lib/apis';
+	import { SaveResponse } from '$lib/apis/responses';
 
 	interface MessageType {
 		id: string;
@@ -136,6 +137,8 @@
 	let generatingImage = false;
 
 	let showRateComment = false;
+	
+	let feedback = "";
 
 	const copyToClipboard = async (text) => {
 		const res = await _copyToClipboard(text);
@@ -469,6 +472,21 @@
 
 		await tick();
 	});
+
+	const GetParentContent = (message) => {
+		if (message.parentId !== null) {
+			const tmpParentId = message.parentId;
+			const tmpPrompt = history.messages[tmpParentId].content;
+			return tmpPrompt;
+		}
+		
+		return null;
+	};
+
+	const GetUserPrompt = (message) => {
+		const tmpValue = GetParentContent(message);
+		return tmpValue;
+	};
 </script>
 
 {#key message.id}
@@ -1016,6 +1034,7 @@
 												disabled={feedbackLoading}
 												on:click={async () => {
 													await feedbackHandler(1);
+													feedback = "Good";
 
 													(model?.actions ?? [])
 														.filter((action) => action?.__webui__ ?? false)
@@ -1067,6 +1086,7 @@
 												disabled={feedbackLoading}
 												on:click={async () => {
 													await feedbackHandler(-1);
+													feedback = "Bad";
 
 													(model?.actions ?? [])
 														.filter((action) => action?.__webui__ ?? false)
@@ -1240,6 +1260,14 @@
 									reason: e.detail.reason
 								});
 
+								//判斷儲存的Id是否為最新的messageId
+								if (message.id == history.currentId){
+									IsResponse.set(true);
+								}
+								const Userprompt = GetUserPrompt(message);
+								SaveResponse(localStorage.token, chatId, message.id, feedback, Userprompt, message.content, 
+											e.detail.reason, e.detail.comment, message.model);
+								
 								(model?.actions ?? [])
 									.filter((action) => action?.__webui__ ?? false)
 									.forEach((action) => {

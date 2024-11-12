@@ -29,6 +29,8 @@ class User(Base):
     info = Column(JSONField, nullable=True)
 
     oauth_sub = Column(Text, unique=True)
+    model_selector = Column(String)
+    department = Column(String)
 
 
 class UserSettings(BaseModel):
@@ -55,6 +57,8 @@ class UserModel(BaseModel):
     oauth_sub: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+    model_selector: str
+    department: str
 
 
 ####################
@@ -73,6 +77,18 @@ class UserUpdateForm(BaseModel):
     profile_image_url: str
     password: Optional[str] = None
 
+class UserModelDepartmentUpdateForm(BaseModel):
+    id: str
+    model_selector: str
+    department: str
+    
+class UserModelUpdateForm(BaseModel):
+    id: str
+    model_selector: str
+
+class ListUserModelUpdateForm(BaseModel):
+    id: list[str]
+    add_model: str
 
 class UsersTable:
     def insert_new_user(
@@ -83,6 +99,8 @@ class UsersTable:
         profile_image_url: str = "/user.png",
         role: str = "pending",
         oauth_sub: Optional[str] = None,
+        model_selector: str = "FT翻譯, 一般知識",
+        department: str = "FT-User",
     ) -> Optional[UserModel]:
         with get_db() as db:
             user = UserModel(
@@ -96,6 +114,8 @@ class UsersTable:
                     "created_at": int(time.time()),
                     "updated_at": int(time.time()),
                     "oauth_sub": oauth_sub,
+                    "model_selector": model_selector,
+                    "department": department,
                 }
             )
             result = User(**user.model_dump())
@@ -256,6 +276,76 @@ class UsersTable:
                 return user.api_key
         except Exception:
             return None
+        
+    def update_user_model_department_by_id(self, id: str, model_selector: str, department: str) -> Optional[UserModel]:
+        try:
+            with get_db() as db:
+                db.query(User).filter_by(id=id).update({"model_selector": model_selector, "department": department})
+                db.commit()
+                user = db.query(User).filter_by(id=id).first()
+                return UserModel.model_validate(user)
+        except Exception:
+            return None
+    
+    def update_user_model_by_id(self, id: str, model_selector: str) -> Optional[UserModel]:
+        try:
+            with get_db() as db:
+                db.query(User).filter_by(id=id).update({"model_selector": model_selector})
+                db.commit()
+                user = db.query(User).filter_by(id=id).first()
+                return UserModel.model_validate(user)
+        except Exception:
+            return None
+        
+    def update_list_user_model_by_id(self, id: list[str], add_model: str) -> Optional[UserModel]:
+        try:
+            for nowid in id:
+                with get_db() as db:
+                    new_enable_model = '';
+                    Bool_continue = False
+                    user = db.query(User).filter_by(id=nowid).first()
+                    if user.role == 'admin':
+                        continue
+                    
+                    JudgeString = [model.strip().strip("'").strip('"') for model in user.model_selector.split(',')]
+                    for user_model in JudgeString:
+                        if 'all model' in user_model.lower() or add_model.lower() in user_model.lower():
+                            Bool_continue = True
+                            continue
+                        #如果有上引號在單個模型名稱中，應為輸入錯誤導致，直接在拆分一次並輸入new_enable
+                        if ('"' in user_model):
+                            tmp = [model.strip().strip("'").strip('"') for model in user_model.split('"')]
+                            for tmpstr in tmp:
+                                new_enable_model += (tmpstr + ', ')
+                            continue
+                        if (user_model != '' and user_model != ' '):
+                            new_enable_model += (user_model + ', ')
+                    if Bool_continue:
+                        continue
+                    
+                    new_enable_model += (add_model)
+                    
+                    db.query(User).filter_by(id=nowid).update({"model_selector": new_enable_model})
+                    db.commit()
+                        
+            return True
+        except Exception as e:
+            print (e)
+            return False
 
+    def clear_list_user_model_by_id(self, id: list[str]) -> Optional[UserModel]:
+        try:
+            for nowid in id:
+                with get_db() as db:
+                    user = db.query(User).filter_by(id=nowid).first()
+                    if user.role == 'admin':
+                        continue
+                    
+                    db.query(User).filter_by(id=nowid).update({"model_selector": ''})
+                    db.commit()
+            return True
+        except Exception as e:
+            print (e)
+            return False
 
 Users = UsersTable()

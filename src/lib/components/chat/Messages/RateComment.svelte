@@ -22,13 +22,8 @@
 		'other'
 	];
 	let DISLIKE_REASONS = [
-		'dont_like_the_style',
-		'too_verbose',
-		'not_helpful',
 		'not_factually_correct',
 		'didnt_fully_follow_instructions',
-		'refused_when_it_shouldnt_have',
-		'being_lazy',
 		'other'
 	];
 

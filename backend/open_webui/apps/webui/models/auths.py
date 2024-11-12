@@ -53,6 +53,8 @@ class UserResponse(BaseModel):
     name: str
     role: str
     profile_image_url: str
+    enable_model: str
+    department: str
 
 
 class SigninResponse(Token, UserResponse):

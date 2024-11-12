@@ -22,6 +22,8 @@ from open_webui.apps.webui.routers import (
     tools,
     users,
     utils,
+    responses,
+    usagerate,
 )
 from open_webui.apps.webui.utils import load_function_module_by_id
 from open_webui.config import (
@@ -144,6 +146,8 @@ app.include_router(folders.router, prefix="/folders", tags=["folders"])
 app.include_router(files.router, prefix="/files", tags=["files"])
 
 app.include_router(utils.router, prefix="/utils", tags=["utils"])
+app.include_router(responses.router, prefix="/responses", tags=["responses"])
+app.include_router(usagerate.router, prefix="/usagerate", tags=["usagerate"])
 
 
 @app.get("/")

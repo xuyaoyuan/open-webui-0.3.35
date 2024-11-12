@@ -9,6 +9,9 @@ from open_webui.apps.webui.models.users import (
     Users,
     UserSettings,
     UserUpdateForm,
+    UserModelDepartmentUpdateForm,
+    UserModelUpdateForm,
+    ListUserModelUpdateForm,
 )
 from open_webui.constants import ERROR_MESSAGES
 from open_webui.env import SRC_LOG_LEVELS
@@ -251,6 +254,57 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=ERROR_MESSAGES.DELETE_USER_ERROR,
         )
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=ERROR_MESSAGES.ACTION_PROHIBITED,
+    )
+
+############################
+# UpdateUserModelWhitelisting
+############################
+
+
+@router.post("/update/model_selector_department", response_model=Optional[UserModel])
+async def update_user_modelwhitelisting_department(form_data: UserModelDepartmentUpdateForm, user=Depends(get_admin_user)):
+
+    if user.id != form_data.id and form_data.id != Users.get_first_user().id:
+        return Users.update_user_model_department_by_id(form_data.id, form_data.model_selector, form_data.department)
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=ERROR_MESSAGES.ACTION_PROHIBITED,
+    )
+    
+@router.post("/update/model_selector", response_model=Optional[UserModel])
+async def update_user_modelwhitelisting(form_data: UserModelUpdateForm, user=Depends(get_admin_user)):
+
+    if user.id != form_data.id and form_data.id != Users.get_first_user().id:
+        return Users.update_user_model_by_id(form_data.id, form_data.model_selector)
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=ERROR_MESSAGES.ACTION_PROHIBITED,
+    )
+    
+@router.post("/update/list_user_model_selector", response_model=bool)
+async def update_list_user_modelwhitelisting(form_data: ListUserModelUpdateForm, user=Depends(get_admin_user)):
+
+    if user:
+        res = Users.update_list_user_model_by_id(form_data.id, form_data.add_model)
+        return res
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=ERROR_MESSAGES.ACTION_PROHIBITED,
+    )
+    
+@router.post("/clear/list_user_model_selector", response_model=bool)
+async def clear_list_user_modelwhitelisting(form_data: ListUserModelUpdateForm, user=Depends(get_admin_user)):
+
+    if user:
+        res = Users.clear_list_user_model_by_id(form_data.id)
+        return res
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,

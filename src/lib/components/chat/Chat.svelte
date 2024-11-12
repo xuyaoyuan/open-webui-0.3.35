@@ -34,7 +34,8 @@
 		mobile,
 		showOverview,
 		chatTitle,
-		showArtifacts
+		showArtifacts,
+		IsResponse
 	} from '$lib/stores';
 	import {
 		convertMessagesToHistory,
@@ -55,7 +56,8 @@
 		getChatById,
 		getChatList,
 		getTagsById,
-		updateChatById
+		updateChatById,
+		CheckMessageResponse
 	} from '$lib/apis/chats';
 	import { generateOpenAIChatCompletion } from '$lib/apis/openai';
 	import { processWeb, processWebSearch, processYoutubeVideo } from '$lib/apis/retrieval';
@@ -70,6 +72,7 @@
 		generateMoACompletion,
 		generateTags
 	} from '$lib/apis';
+	import { SaveUsageRate } from '$lib/apis/usagerate';
 
 	import Banner from '../common/Banner.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -78,6 +81,7 @@
 	import ChatControls from './ChatControls.svelte';
 	import EventConfirmDialog from '../common/ConfirmDialog.svelte';
 	import Placeholder from './Placeholder.svelte';
+	// import { str } from 'crc-32/*';
 
 	export let chatIdProp = '';
 
@@ -139,6 +143,28 @@
 				await goto('/');
 			}
 		})();
+	}
+
+	function extractBeforeColon(inputString) {
+		const colonIndex = inputString.indexOf(":");
+		if (colonIndex !== -1) {
+			// console.log(inputString.substring(0, colonIndex));
+			return inputString.substring(0, colonIndex);
+		}else {
+			// console.log(inputString);
+			return inputString
+		}
+	}
+
+	function extractAfterColon(inputString) {
+		const colonIndex = inputString.indexOf(":");
+		if (colonIndex !== -1) {
+			// console.log(inputString.substring(0, colonIndex));
+			return inputString.substring(colonIndex + 1);
+		}else {
+			// console.log(inputString);
+			return null
+		}
 	}
 
 	const showMessage = async (message) => {
@@ -424,6 +450,8 @@
 		await showCallOverlay.set(false);
 		await showOverview.set(false);
 		await showArtifacts.set(false);
+		//新對話時，讓Response設為true，就不會打擾到沒回傳的了
+		IsResponse.set(true);
 
 		if ($page.url.pathname.includes('/c/')) {
 			window.history.replaceState(history.state, '', `/`);
@@ -544,6 +572,7 @@
 		chatId.set(chatIdProp);
 		chat = await getChatById(localStorage.token, $chatId).catch(async (error) => {
 			await goto('/');
+			IsResponse.set(true);
 			return null;
 		});
 
@@ -561,6 +590,13 @@
 					(chatContent?.models ?? undefined) !== undefined
 						? chatContent.models
 						: [chatContent.models ?? ''];
+				selectedModels.forEach(element => {
+					if ($user?.enable_model.includes(extractBeforeColon(element)) || $user?.enable_model.includes("all model") || $user?.role === "admin"){
+						
+					} else{
+						selectedModels = [''];
+					}
+				});
 				history =
 					(chatContent?.history ?? undefined) !== undefined
 						? chatContent.history
@@ -587,8 +623,13 @@
 				}
 				await tick();
 
+				//載入對話，對話有可能儲存response了，所以要判斷
+				let tmpMessage = history.messages[Object.keys(history.messages).pop()];
+				let tmpRes = await CheckMessageResponse(localStorage.token, tmpMessage.id);
+				IsResponse.set(tmpRes);
 				return true;
 			} else {
+				IsResponse.set(true);
 				return null;
 			}
 		}
@@ -798,9 +839,19 @@
 		console.log('submitPrompt', userPrompt, $chatId);
 
 		const messages = createMessagesList(history.currentId);
-		selectedModels = selectedModels.map((modelId) =>
-			$models.map((m) => m.id).includes(modelId) ? modelId : ''
+		selectedModels = extractBeforeColon(selectedModels).map((modelId) =>
+			$models.map((m) => extractBeforeColon(m.id)).includes(extractBeforeColon(modelId)) ? modelId : ''
 		);
+
+		for (const element of selectedModels){
+			if ($user?.enable_model.includes(extractBeforeColon(element)) || $user?.enable_model.includes('all model') || $user?.role === 'admin'){
+
+			}else{
+				selectedModelIds = [];
+				toast.error($i18n.t('Model not selected. Please select the available model.'));
+				return null;
+			}
+		}
 
 		if (userPrompt === '') {
 			toast.error($i18n.t('Please enter a prompt'));
@@ -1421,7 +1472,19 @@
 				await setChatTags(messages);
 			}
 		}
-
+		let  final_response = null
+		if (_response === null){
+			final_response = "";
+		}else{
+			final_response = _response;
+		}
+		let SaveUsage = await SaveUsageRate(localStorage.token, model.name, extractAfterColon(model.id), userPrompt, final_response);
+		if (SaveUsage){
+			console.log("Usage Record Success.");
+		}
+		
+		//問完問題一定還沒response，所以直接設為false
+		IsResponse.set(false);
 		return _response;
 	};
 
@@ -1741,6 +1804,12 @@
 			}
 		}
 
+		let SaveUsage = await SaveUsageRate(localStorage.token, model.name, extractAfterColon(model.id), userPrompt, _response);
+		if (SaveUsage){
+			console.log("Usage Record Success.");
+		}
+		//問完問題一定還沒response，所以直接設為false
+		IsResponse.set(false);
 		return _response;
 	};
 

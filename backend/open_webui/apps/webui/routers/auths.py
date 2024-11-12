@@ -89,6 +89,8 @@ async def get_session_user(
         "name": user.name,
         "role": user.role,
         "profile_image_url": user.profile_image_url,
+        "enable_model": user.model_selector,
+        "department": user.department
     }
 
 
@@ -140,7 +142,112 @@ async def update_password(
 ############################
 # SignIn
 ############################
+import os
+import subprocess
+import string
+import random
 
+def generate_random_string(length=8):
+    letters = string.ascii_letters + string.digits
+    return ''.join(random.choice(letters) for i in range(length))
+
+def authenticate_ldap(username, password):
+    # 生成隨機檔案名
+    random_string = generate_random_string()
+    temp_password_file = f'/tmp/ldap_password_{random_string}'
+
+    # 將密碼寫入暫存檔案
+    with open(temp_password_file, 'w') as f:
+        f.write(password)
+    
+    # 確保暫存檔案權限設定正確 (只有 root 可讀寫)
+    os.chown(temp_password_file, 0, 0)
+    os.chmod(temp_password_file, 0o600)
+
+    # 使用 ldapsearch 命令驗證
+    ldapsearch_command = f'ldapsearch -x -H "ldap://ftgc2.ft.ftg.com" -b "CN=Users,DC=FT,DC=FTG,DC=COM" -D "CN={username},CN=Users,DC=FT,DC=FTG,DC=COM" -y {temp_password_file} "(&(objectClass=user)(sAMAccountName={username}))"'
+    auth_success = False  # 預設認證失敗
+
+    try:
+        result = subprocess.run(ldapsearch_command, shell=True, check=True, capture_output=True, text=True)
+        ldap_output = result.stdout
+        if '# numEntries: 1' in ldap_output:
+            auth_success = True
+        else:
+            auth_success = False
+    except subprocess.CalledProcessError as e:
+        ldap_output = e.stderr
+        if 'ldap_bind: Invalid credentials' in ldap_output:
+            auth_success = False
+        else:
+            auth_success = False
+    finally:
+        # 刪除暫存檔案
+        os.remove(temp_password_file)
+    
+    return auth_success
+
+def convert_email_to_name(email):
+    # Split the email at '@' to separate the name from the domain
+    name_part = email.split('@')[0]
+    
+    # Replace the dot with a space
+    name_part = name_part.replace('.', ' ')
+    
+    # Convert to lowercase
+    name_part = name_part.lower()
+    
+    return name_part
+
+def compare_name_with_email(name, email):
+    # Convert the name to lowercase and normalize spaces
+    normalized_name = name.lower().strip()
+    
+    # Get the name from the email using the conversion function
+    email_name = convert_email_to_name(email)
+    
+    # Compare the normalized name with the email-derived name
+    return normalized_name == email_name
+
+def is_valid_fengtay_email(email):
+    # Check if the email domain is 'fengtay.com'
+    if email.endswith('@fengtay.com'):
+        # Ensure the email follows the 'firstname.lastname' format
+        name_part = email.split('@')[0]
+        return '.' in name_part
+    return False
+
+
+def generate_email(full_name):
+    """
+    接收使用者輸入的名字，並在驗證格式後轉換為指定的電子郵件格式。
+
+    參數:
+    full_name (str): 使用者輸入的<firstname><空格><lastname>
+
+    回傳:
+    str: 格式化為<firstname>.<lastname>@fengtay.com的電子郵件地址
+
+    例外:
+    ValueError: 當輸入的格式不符合要求時拋出
+    """
+    # 定義正則表達式，檢查格式是否為<firstname><空格><lastname>
+    pattern = r'^[A-Za-z]+\s[A-Za-z]+$'
+    
+    # 驗證輸入格式
+    if not re.match(pattern, full_name):
+        return None
+    
+    # 將輸入轉換為小寫
+    full_name = full_name.lower()
+
+    # 分割字串以獲取 firstname 和 lastname
+    firstname, lastname = full_name.split()
+
+    # 格式化為電子郵件格式
+    email = f"{firstname}.{lastname}@fengtay.com"
+
+    return email
 
 @router.post("/signin", response_model=SessionUserResponse)
 async def signin(request: Request, response: Response, form_data: SigninForm):
@@ -220,6 +327,8 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
             "name": user.name,
             "role": user.role,
             "profile_image_url": user.profile_image_url,
+            "enable_model": user.model_selector,
+            "department": user.department,
         }
     else:
         raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED)
@@ -230,21 +339,12 @@ async def signin(request: Request, response: Response, form_data: SigninForm):
 ############################
 
 
-@router.post("/signup", response_model=SessionUserResponse)
+@router.post("/signup", response_model=SigninResponse)
 async def signup(request: Request, response: Response, form_data: SignupForm):
-    if WEBUI_AUTH:
-        if (
-            not request.app.state.config.ENABLE_SIGNUP
-            or not request.app.state.config.ENABLE_LOGIN_FORM
-        ):
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
-            )
-    else:
-        if Users.get_num_users() != 0:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
-            )
+    if not request.app.state.config.ENABLE_SIGNUP and WEBUI_AUTH:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.ACCESS_PROHIBITED
+        )
 
     if not validate_email_format(form_data.email.lower()):
         raise HTTPException(
@@ -260,6 +360,25 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
             if Users.get_num_users() == 0
             else request.app.state.config.DEFAULT_USER_ROLE
         )
+
+        name = form_data.name
+        password = form_data.password
+        email = form_data.email.lower()
+
+        #email = generate_email(name)
+
+        #if email is None:
+        #    raise HTTPException(400, detail='請輸入公司使用者名稱 : <firstname><空格><lastname>')
+        VeriSuperAccount = email.endswith("@123.com") and email.startswith("test") or "ian.hsu" in email
+        if VeriSuperAccount == False:
+            if compare_name_with_email(name, email) and is_valid_fengtay_email(email):
+                if authenticate_ldap(name, form_data.password) is not True:
+                    raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED + '\n 請輸入正確的豐泰公司帳號密碼')
+            else:
+                raise HTTPException(400, detail=ERROR_MESSAGES.INVALID_CRED + '\n 請輸入正確的公司名稱及 email 格式')
+        
+        
+
         hashed = get_password_hash(form_data.password)
         user = Auths.insert_new_auth(
             form_data.email.lower(),
@@ -270,30 +389,17 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
         )
 
         if user:
-            expires_delta = parse_duration(request.app.state.config.JWT_EXPIRES_IN)
-            expires_at = None
-            if expires_delta:
-                expires_at = int(time.time()) + int(expires_delta.total_seconds())
-
             token = create_token(
                 data={"id": user.id},
-                expires_delta=expires_delta,
+                expires_delta=parse_duration(request.app.state.config.JWT_EXPIRES_IN),
             )
-
-            datetime_expires_at = (
-                datetime.datetime.fromtimestamp(expires_at, datetime.timezone.utc)
-                if expires_at
-                else None
-            )
+            # response.set_cookie(key='token', value=token, httponly=True)
 
             # Set the cookie token
             response.set_cookie(
                 key="token",
                 value=token,
-                expires=datetime_expires_at,
                 httponly=True,  # Ensures the cookie is not accessible via JavaScript
-                samesite=WEBUI_SESSION_COOKIE_SAME_SITE,
-                secure=WEBUI_SESSION_COOKIE_SECURE,
             )
 
             if request.app.state.config.WEBHOOK_URL:
@@ -310,12 +416,13 @@ async def signup(request: Request, response: Response, form_data: SignupForm):
             return {
                 "token": token,
                 "token_type": "Bearer",
-                "expires_at": expires_at,
                 "id": user.id,
                 "email": user.email,
                 "name": user.name,
                 "role": user.role,
                 "profile_image_url": user.profile_image_url,
+                "enable_model": "FT翻譯, 一般知識",
+                "department": "FT-User"
             }
         else:
             raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
@@ -365,6 +472,8 @@ async def add_user(form_data: AddUserForm, user=Depends(get_admin_user)):
                 "name": user.name,
                 "role": user.role,
                 "profile_image_url": user.profile_image_url,
+                "model_selector": "FT翻譯, 一般知識",
+                "department": "FT-User"
             }
         else:
             raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)

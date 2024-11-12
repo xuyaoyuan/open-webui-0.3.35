@@ -36,6 +36,7 @@ router = APIRouter()
 ############################
 # Upload File
 ############################
+
 from open_webui.apps.webui.routers.loader.classes.PDFLoader import PDFLoader
 from open_webui.apps.webui.routers.loader.classes.DOCXLoader import DOCXLoader
 from open_webui.apps.webui.routers.loader.classes.XLSXLoader import XLSXLoader
@@ -66,9 +67,14 @@ def format_chunks(chunks: List[Chunk]) -> str:
     
     return formatted_output
 
+
 @router.post("/", response_model=FileModelResponse)
 def upload_file(file: UploadFile = File(...), user=Depends(get_verified_user)):
     log.info(f"file.content_type: {file.content_type}")
+    
+    # Allowed file extensions and size limit
+    allowed_extensions = {".msg", ".pdf", ".pptx", ".docx", ".txt", ".md"}
+    
     try:
         unsanitized_filename = file.filename
         filename = os.path.basename(unsanitized_filename)
@@ -79,106 +85,42 @@ def upload_file(file: UploadFile = File(...), user=Depends(get_verified_user)):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Unsupported file format. Allowed formats: .msg, .pdf, .pptx, .docx, .txt, .md"
             )
-        
+
         # replace filename with uuid
         id = str(uuid.uuid4())
         name = filename
         filename = f"{id}_{filename}"
         contents, file_path = Storage.upload_file(file.file, filename)
-
+        
         # Handling .txt and .md files
-        if ext in ['.txt', '.md']:
             # Process as text-based content (original handling)    
             # Validate file size
-            contents = file.file.read()
-
+            # contents = file.file.read()
             
-            # Save file to disk
-            with open(file_path, "wb") as f:
-                f.write(contents)
-                f.close()
+        # Save file to disk
+        with open(file_path, "wb") as f:
+            f.write(contents)
+            f.close()
 
-            content = contents.decode("utf-8")
-            # Insert into database (as per original logic)
-            file_item = Files.insert_new_file(
-                user.id,
-                FileForm(
-                    **{
-                        "id": id,
-                        "filename": filename,
-                        "path": file_path,
-                        "meta": {
-                            "name": name,
-                            "content_type": file.content_type,
-                            "size": len(contents),
-                        },
-                    }
-                ),
-            )
-        else:
-            
-            loaders = {
-                'docx': DOCXLoader,
-                'pptx': PPTXLoader,
-                #'xlsx': XLSXLoader,
-                'pdf': PDFLoader,
-                'msg': MSGLoader
-            }
-            # Handling other file types with loaders
-            LoaderClass = loaders.get(ext.lstrip('.'))  # Get loader class based on extension
-         
-            if LoaderClass:
+        content = contents.decode("utf-8")
+        # Insert into database (as per original logic)
+        file_item = Files.insert_new_file(
+            user.id,
+            FileForm(
+                **{
+                    "id": id,
+                    "filename": filename,
+                    "path": file_path,
+                    "meta": {
+                        "name": name,
+                        "content_type": file.content_type,
+                        "size": len(contents),
+                    },
+                }
+            ),
+        )
+        
 
-                raw_content = file.file.read()
-                
-                # Save file to disk
-                with open(file_path, "wb") as f:
-                    f.write(raw_content)
-                    f.close()
-
-                loader = LoaderClass(directory=f"{UPLOAD_DIR}")
-                loader._load_file(file_path=file_path)
-                chunks = loader.loaded_files[file_path]
-
-                all_chunks = []
-
-                for chunk in chunks:
-                    all_chunks.append(chunk)
-
-                # Format the loaded content
-                content = format_chunks(all_chunks)
-
-                 # Validate file extension
-                filename = os.path.basename(name)
-                ext = os.path.splitext(filename)[1].lower()
-                base_filename = os.path.splitext(filename)[0]  # Original filename without extension
-
-
-                # Save extracted content as a .txt file
-                extracted_filename = f"{id}_{base_filename}.txt"
-                extracted_file_path = f"{UPLOAD_DIR}/{extracted_filename}"
-                with open(extracted_file_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-
-                # Update path in the database for the new .txt file
-                file_item = Files.insert_new_file(
-                    user.id,
-                    FileForm(
-                        **{
-                            "id": id,
-                            "filename": filename,
-                            "path": file_path,
-                            "meta": {
-                                "name": name,
-                                "content_type": file.content_type,
-                                "size": len(contents),
-                            },
-                        }
-                    ),
-                )
-            else:
-                file = None
-                
         try:
             process_file(ProcessFileForm(file_id=id))
             file_item = Files.get_file_by_id(id=id)
